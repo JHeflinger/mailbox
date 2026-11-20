@@ -1,0 +1,25 @@
+name: Build Mailbox
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          ./scripts/build.sh
+          mkdir mailbox_linux_x64
+          mv build/bin.exe mailbox_linux_x64/mailbox
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mailbox_linux_x64
+          path: mailbox_linux_x64/
