@@ -18,7 +18,6 @@ BOOL HelpCommand(char** argv, int argc) {
     (void)argc;
     char config[MAX_PATH_SIZE] = { 0 };
     if (!LocateConfig(config, sizeof(config))) strcpy(config, "(unable to locate a home directory)");
-    printf("%smailbox%s v%s - send files between machines\n\n", Paint(EZ_CYAN), Paint(EZ_RESET), MAILBOX_VERSION);
     printf("commands:\n");
     printf("  mailbox help                         lists all commands and usages\n");
     printf("  mailbox version | -v                 outputs the version\n");
@@ -30,14 +29,6 @@ BOOL HelpCommand(char** argv, int argc) {
     printf("config: %s\n", config);
     printf("  set %s to use a different config file\n", CONFIG_ENV_VARIABLE);
     printf("  set %s to skip the password prompt when sending\n\n", PASSWORD_ENV_VARIABLE);
-    printf("config format:\n");
-    printf("  PORT: %d          port to receive on and send to\n", DEFAULT_PORT);
-    printf("  ID: my-machine      name this machine introduces itself as\n");
-    printf("  INBOXSIZE: 1G       maximum total size of the mailbox directory (bytes, or K/M/G/T)\n");
-    printf("  DIRECTORY: inbox    the mailbox directory files are received into\n");
-    printf("  DNS: dns            ID -> IP lookup file, filled in automatically after successful sends\n");
-    printf("  STATE: state        record of received mail and whether it has been read\n");
-    printf("  PASSWORD:           optional - senders must enter it before a transfer is accepted\n");
     return TRUE;
 }
 

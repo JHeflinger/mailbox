@@ -5,6 +5,8 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <signal.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -16,14 +18,58 @@
 #endif
 #else
 #include <unistd.h>
+#include <sys/ioctl.h>
 #define ISATTY(fd) isatty(fd)
 #endif
 
 #define PROGRESS_WIDTH 40
+#define PROGRESS_MIN_WIDTH 10
+#define FALLBACK_COLUMNS 80
 #define PROGRESS_INTERVAL 0.1f
 
 static BOOL g_colors = FALSE;
 static BOOL g_interactive = FALSE;
+static BOOL g_cursor_hidden = FALSE;
+
+static int TerminalColumns() {
+    #ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+        return info.srWindow.Right - info.srWindow.Left + 1;
+    }
+    #else
+    struct winsize size;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
+    #endif
+    return FALLBACK_COLUMNS;
+}
+
+#ifdef _WIN32
+static BOOL WINAPI RestoreOnInterrupt(DWORD event) {
+    (void)event;
+    fputs("\033[?25h\n", stdout);
+    fflush(stdout);
+    return FALSE;
+}
+#else
+static void RestoreOnInterrupt(int signal) {
+    static const char restore[] = "\033[?25h\n";
+    if (write(STDOUT_FILENO, restore, sizeof(restore) - 1) < 0) { }
+    _exit(128 + signal);
+}
+#endif
+
+static void ToggleCursor(BOOL show) {
+    if (!g_colors || show != g_cursor_hidden) return;
+    #ifdef _WIN32
+    SetConsoleCtrlHandler(RestoreOnInterrupt, show ? FALSE : TRUE);
+    #else
+    signal(SIGINT, show ? SIG_DFL : RestoreOnInterrupt);
+    signal(SIGTERM, show ? SIG_DFL : RestoreOnInterrupt);
+    #endif
+    printf(show ? "\033[?25h" : "\033[?25l");
+    g_cursor_hidden = !show;
+}
 
 void InitializeOutput() {
     g_interactive = ISATTY(1) ? TRUE : FALSE;
@@ -114,14 +160,6 @@ void FormatTimestamp(char* out, size_t size, int64_t timestamp) {
 
 static void DrawProgress(Progress* progress) {
     float pct = progress->total == 0 ? 100.0f : 100.0f * (float)((double)progress->done / (double)progress->total);
-    int filled = (int)(pct * PROGRESS_WIDTH / 100.0f);
-    if (filled > PROGRESS_WIDTH) filled = PROGRESS_WIDTH;
-    char bar[PROGRESS_WIDTH + 1] = { 0 };
-    for (int i = 0; i < PROGRESS_WIDTH; i++) {
-        if (i < filled) bar[i] = '=';
-        else if (i == filled) bar[i] = '>';
-        else bar[i] = ' ';
-    }
     char done[32] = { 0 };
     char total[32] = { 0 };
     char rate[32] = { 0 };
@@ -129,8 +167,37 @@ static void DrawProgress(Progress* progress) {
     FormatSize(done, sizeof(done), progress->done);
     FormatSize(total, sizeof(total), progress->total);
     FormatSize(rate, sizeof(rate), elapsed > 0.0f ? (uint64_t)((double)progress->done / elapsed) : 0);
-    printf("\rProgress: [%s%s%s] %6.2f%%  %s / %s  %s/s    ",
-        Paint(EZ_GREEN), bar, Paint(EZ_RESET), pct, done, total, rate);
+
+    // everything after the bar, then shrink the bar (and drop details) so the line never wraps
+    char details[128] = { 0 };
+    char percent[16] = { 0 };
+    snprintf(percent, sizeof(percent), " %6.2f%%", pct);
+    snprintf(details, sizeof(details), "%s  %s / %s  %s/s", percent, done, total, rate);
+    int columns = (g_interactive ? TerminalColumns() : FALLBACK_COLUMNS) - 1;
+    const char* label = "Progress: ";
+    int fixed = (int)strlen(label) + 2;
+    int width = columns - fixed - (int)strlen(details);
+    if (width < PROGRESS_MIN_WIDTH) {
+        snprintf(details, sizeof(details), "%s", percent);
+        width = columns - fixed - (int)strlen(details);
+    }
+    if (width < PROGRESS_MIN_WIDTH) {
+        label = "";
+        width = columns - 2 - (int)strlen(details);
+    }
+    if (width > PROGRESS_WIDTH) width = PROGRESS_WIDTH;
+    if (width < 1) width = 1;
+
+    int filled = (int)(pct * (float)width / 100.0f);
+    if (filled > width) filled = width;
+    char bar[PROGRESS_WIDTH + 1] = { 0 };
+    for (int i = 0; i < width; i++) {
+        if (i < filled) bar[i] = '=';
+        else if (i == filled) bar[i] = '>';
+        else bar[i] = ' ';
+    }
+    // \r returns to the start of the same line, \033[K wipes anything left over from the last draw
+    printf("\r%s[%s%s%s]%s%s", label, Paint(EZ_GREEN), bar, Paint(EZ_RESET), details, g_colors ? "\033[K" : "");
     fflush(stdout);
 }
 
@@ -139,7 +206,10 @@ void BeginProgress(Progress* progress, uint64_t total) {
     progress->total = total;
     progress->start = ez_get_time();
     progress->last = -1.0f;
-    if (g_interactive) DrawProgress(progress);
+    if (g_interactive) {
+        ToggleCursor(FALSE);
+        DrawProgress(progress);
+    }
 }
 
 void UpdateProgress(Progress* progress, uint64_t done) {
@@ -155,6 +225,7 @@ void EndProgress(Progress* progress) {
     if (progress->finished) return;
     progress->finished = TRUE;
     if (g_interactive || progress->done == progress->total) DrawProgress(progress);
+    ToggleCursor(TRUE);
     printf("\n");
     fflush(stdout);
 }
