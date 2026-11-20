@@ -16,7 +16,7 @@ mailbox clear <all|id...>            marks all mail, or specific mail IDs, as re
 
 ## Config
 
-Lives at `~/.mailbox/config` (`%USERPROFILE%\.mailbox\config` on Windows), or wherever `MAILBOX_CONFIG` points. A default one is generated on first run. Relative paths resolve against the config's folder, and `~` is expanded.
+A default one is generated on first run!
 
 ```
 PORT: 7570          port to receive on and send to (1024-65535)
