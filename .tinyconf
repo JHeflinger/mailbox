@@ -1,0 +1,8 @@
+PROJECT src
+MAIN main.c
+
+MODULE easyc https://github.com/JHeflinger/EasyC.git include
+
+WINDOWS LINK ws2_32
+
+FLAG audit
