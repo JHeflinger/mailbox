@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# create all build directories if it does not exist
+if [ ! -d "build" ]; then
+    mkdir "build"
+fi
+
 # download builder
 if [ ! -f "build/tiny_linux.bin" ] || [ "$1" == "-u" ] || [ "$2" == "-u" ]; then
     if [ -f "build/tiny_linux.bin" ]; then
