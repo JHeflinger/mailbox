@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#endif
 
 #define PACKET_HEADER_SIZE 5
 #define PACKET_OVERFLOW ((size_t)-1)
@@ -45,6 +48,72 @@ BOOL ReceiveAll(EZ_SOCKET socket, void* data, size_t size) {
         size -= (size_t)got;
     }
     return TRUE;
+}
+
+static BOOL SetBlocking(EZ_SOCKET socket, BOOL blocking) {
+    #ifdef _WIN32
+    u_long mode = blocking ? 0 : 1;
+    return ioctlsocket(socket, FIONBIO, &mode) == 0;
+    #else
+    int flags = fcntl(socket, F_GETFL, 0);
+    if (flags < 0) return FALSE;
+    flags = blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
+    return fcntl(socket, F_SETFL, flags) == 0;
+    #endif
+}
+
+EZ_SOCKET ConnectQuick(ez_Ipv4 address, uint16_t port, uint32_t timeout_ms) {
+    EZ_SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == EZ_INVALID_SOCK) return EZ_INVALID_SOCK;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    memcpy(&addr.sin_addr.s_addr, address.address, 4);
+    if (!SetBlocking(sock, FALSE)) {
+        EZ_CLOSE_SOCKET(sock);
+        return EZ_INVALID_SOCK;
+    }
+    // one non-blocking attempt, then a single select() wait - no retries, no spinning
+    int res = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+    if (res != 0) {
+        #ifdef _WIN32
+        BOOL pending = WSAGetLastError() == WSAEWOULDBLOCK;
+        #else
+        BOOL pending = errno == EINPROGRESS;
+        #endif
+        if (!pending) {
+            EZ_CLOSE_SOCKET(sock);
+            return EZ_INVALID_SOCK;
+        }
+        fd_set writefds, errorfds;
+        FD_ZERO(&writefds);
+        FD_ZERO(&errorfds);
+        FD_SET(sock, &writefds);
+        FD_SET(sock, &errorfds);
+        struct timeval timeout;
+        timeout.tv_sec = timeout_ms / 1000;
+        timeout.tv_usec = (timeout_ms % 1000) * 1000;
+        if (select((int)sock + 1, NULL, &writefds, &errorfds, &timeout) <= 0) {
+            EZ_CLOSE_SOCKET(sock);
+            return EZ_INVALID_SOCK;
+        }
+        int error = 0;
+        socklen_t len = sizeof(error);
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (EZ_OPT_TYPE*)&error, &len) != 0 || error != 0) {
+            EZ_CLOSE_SOCKET(sock);
+            return EZ_INVALID_SOCK;
+        }
+    }
+    if (!SetBlocking(sock, TRUE)) {
+        EZ_CLOSE_SOCKET(sock);
+        return EZ_INVALID_SOCK;
+    }
+    return sock;
+}
+
+void CloseSocket(EZ_SOCKET socket) {
+    if (socket != EZ_INVALID_SOCK) EZ_CLOSE_SOCKET(socket);
 }
 
 BOOL SetSocketTimeout(EZ_SOCKET socket, uint32_t ms) {

@@ -14,6 +14,12 @@ typedef struct {
     char inbox[MAX_PATH_SIZE];
     char dns[MAX_PATH_SIZE];
     char state[MAX_PATH_SIZE];
+    char history[MAX_PATH_SIZE];
+    BOOL proxy;
+    char proxypath[MAX_PATH_SIZE];
+    char proxydir[MAX_PATH_SIZE];
+    uint64_t proxydirsize;
+    uint32_t pinterval;
     char password[MAX_PASSWORD_SIZE];
     BOOL protected;
 } Config;

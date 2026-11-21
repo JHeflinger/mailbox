@@ -17,6 +17,8 @@ BOOL SendCommand(char** argv, int argc);
 
 BOOL ClearCommand(char** argv, int argc);
 
+BOOL HistoryCommand(char** argv, int argc);
+
 BOOL DaemonCommand(char** argv, int argc);
 
 #endif

@@ -25,6 +25,7 @@ static const Command g_commands[] = {
     { "inbox",        InboxCommand },
     { "send",         SendCommand },
     { "clear",        ClearCommand },
+    { "history",      HistoryCommand },
     { DAEMON_COMMAND, DaemonCommand },
 };
 

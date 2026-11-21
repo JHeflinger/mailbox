@@ -14,11 +14,11 @@
 #define PATH_SEPARATOR '/'
 #endif
 
-#define MAILBOX_VERSION "1.0.0"
+#define MAILBOX_VERSION "1.1.0"
 
 // protocol
 #define PROTOCOL_MAGIC 0x584F424DU // "MBOX"
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2
 #define MAX_PACKET_SIZE 4096
 #define CHUNK_SIZE (64 * 1024)
 #define NONCE_SIZE 32
@@ -26,6 +26,10 @@
 #define TOKEN_SIZE 32
 #define HANDSHAKE_TIMEOUT_MS 120000
 #define TRANSFER_TIMEOUT_MS 30000
+#define CONNECT_TIMEOUT_MS 5000
+#define RELAY_CONNECT_TIMEOUT_MS 2000
+#define MAX_HOPS 8
+#define TRACKING_SIZE 32
 
 // limits
 #define MAX_ID_SIZE 64
@@ -34,6 +38,8 @@
 #define MAX_PATH_SIZE 1024
 #define MAX_LINE_SIZE 2048
 #define MAX_COPY_INDEX 100000
+#define MAX_DETAIL_SIZE 192
+#define DEFAULT_HISTORY_COUNT 20
 
 // defaults
 #define DEFAULT_PORT 7570
@@ -43,6 +49,13 @@
 #define DEFAULT_INBOX_NAME "inbox"
 #define DEFAULT_DNS_NAME "dns"
 #define DEFAULT_STATE_NAME "state"
+#define DEFAULT_HISTORY_NAME "history"
+#define DEFAULT_PROXYPATH_NAME "proxies"
+#define DEFAULT_PROXYDIR_NAME "relay"
+#define DEFAULT_PROXYDIRSIZE (1024ULL * 1024ULL * 1024ULL)
+#define DEFAULT_PINTERVAL 60
+#define RELAY_QUEUE_NAME "relayqueue"
+#define RELAY_EXTENSION ".relay"
 #define RUNTIME_FILE_NAME "mailbox.pid"
 #define LOG_FILE_NAME "mailbox.log"
 #define PART_EXTENSION ".mailbox-part"

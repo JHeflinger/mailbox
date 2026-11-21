@@ -12,7 +12,8 @@ typedef enum {
     MSG_VERDICT,
     MSG_COMPLETE,
     MSG_RESULT,
-    MSG_SHUTDOWN
+    MSG_SHUTDOWN,
+    MSG_STATUS
 } MessageType;
 
 typedef enum {
@@ -22,8 +23,22 @@ typedef enum {
     VERDICT_INVALID,
     VERDICT_VERSION,
     VERDICT_FAILED,
-    VERDICT_CORRUPT
+    VERDICT_CORRUPT,
+    VERDICT_NOT_PROXY,
+    VERDICT_NO_ROUTE,
+    VERDICT_DUPLICATE,
+    VERDICT_TOO_MANY_HOPS
 } VerdictCode;
+
+typedef enum {
+    DELIVERY_DIRECT = 0,
+    DELIVERY_PROXY
+} DeliveryKind;
+
+typedef enum {
+    OUTCOME_DELIVERED = 0,
+    OUTCOME_FAILED
+} DeliveryOutcome;
 
 typedef struct {
     ez_Buffer* buffer;
@@ -34,6 +49,10 @@ typedef struct {
 BOOL SendAll(EZ_SOCKET socket, const void* data, size_t size);
 
 BOOL ReceiveAll(EZ_SOCKET socket, void* data, size_t size);
+
+EZ_SOCKET ConnectQuick(ez_Ipv4 address, uint16_t port, uint32_t timeout_ms);
+
+void CloseSocket(EZ_SOCKET socket);
 
 BOOL SetSocketTimeout(EZ_SOCKET socket, uint32_t ms);
 

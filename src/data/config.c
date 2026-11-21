@@ -32,6 +32,29 @@ static BOOL ParseInboxSize(const char* str, uint64_t* out) {
     return *out > 0;
 }
 
+static BOOL ParseFlag(const char* str, BOOL* out) {
+    char lower[16] = { 0 };
+    if (strlen(str) >= sizeof(lower)) return FALSE;
+    for (size_t i = 0; str[i]; i++) lower[i] = (char)tolower((unsigned char)str[i]);
+    if (strcmp(lower, "true") == 0 || strcmp(lower, "yes") == 0 || strcmp(lower, "on") == 0 || strcmp(lower, "1") == 0) {
+        *out = TRUE;
+        return TRUE;
+    }
+    if (strcmp(lower, "false") == 0 || strcmp(lower, "no") == 0 || strcmp(lower, "off") == 0 || strcmp(lower, "0") == 0) {
+        *out = FALSE;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL ParseInterval(const char* str, uint32_t* out) {
+    char* end = NULL;
+    long value = strtol(str, &end, 10);
+    if (end == str || *end != '\0' || value < 1 || value > 86400) return FALSE;
+    *out = (uint32_t)value;
+    return TRUE;
+}
+
 static BOOL ParsePort(const char* str, uint16_t* out) {
     char* end = NULL;
     long value = strtol(str, &end, 10);
@@ -78,6 +101,12 @@ static BOOL GenerateConfig(const char* path) {
     fprintf(file, "DIRECTORY: %s\n", DEFAULT_INBOX_NAME);
     fprintf(file, "DNS: %s\n", DEFAULT_DNS_NAME);
     fprintf(file, "STATE: %s\n", DEFAULT_STATE_NAME);
+    fprintf(file, "HISTORY: %s\n", DEFAULT_HISTORY_NAME);
+    fprintf(file, "PROXY: false\n");
+    fprintf(file, "PROXYPATH: %s\n", DEFAULT_PROXYPATH_NAME);
+    fprintf(file, "PROXYDIR: %s\n", DEFAULT_PROXYDIR_NAME);
+    fprintf(file, "PROXYDIRSIZE: 1G\n");
+    fprintf(file, "PINTERVAL: %d\n", DEFAULT_PINTERVAL);
     fprintf(file, "PASSWORD:\n");
     fclose(file);
     RestrictFile(path);
@@ -139,9 +168,15 @@ BOOL LoadConfig(Config* config) {
     BOOL seen_port = FALSE, seen_id = FALSE, seen_size = FALSE;
     config->port = DEFAULT_PORT;
     config->inboxsize = DEFAULT_INBOXSIZE;
+    config->proxy = FALSE;
+    config->proxydirsize = DEFAULT_PROXYDIRSIZE;
+    config->pinterval = DEFAULT_PINTERVAL;
+    char proxypath[MAX_PATH_SIZE] = DEFAULT_PROXYPATH_NAME;
+    char proxydir[MAX_PATH_SIZE] = DEFAULT_PROXYDIR_NAME;
     char inbox[MAX_PATH_SIZE] = DEFAULT_INBOX_NAME;
     char dns[MAX_PATH_SIZE] = DEFAULT_DNS_NAME;
     char state[MAX_PATH_SIZE] = DEFAULT_STATE_NAME;
+    char history[MAX_PATH_SIZE] = DEFAULT_HISTORY_NAME;
 
     ez_File* file = ez_load_file(config->path);
     if (file == NULL) {
@@ -192,6 +227,27 @@ BOOL LoadConfig(Config* config) {
             if (value[0] != '\0') snprintf(dns, sizeof(dns), "%s", value);
         } else if (strcmp(key, "STATE") == 0) {
             if (value[0] != '\0') snprintf(state, sizeof(state), "%s", value);
+        } else if (strcmp(key, "PROXY") == 0) {
+            if (!ParseFlag(value, &config->proxy)) {
+                PrintError("%s:%d - PROXY must be true or false", config->path, (int)parser.line);
+                valid = FALSE;
+            }
+        } else if (strcmp(key, "PROXYPATH") == 0) {
+            if (value[0] != '\0') snprintf(proxypath, sizeof(proxypath), "%s", value);
+        } else if (strcmp(key, "PROXYDIR") == 0) {
+            if (value[0] != '\0') snprintf(proxydir, sizeof(proxydir), "%s", value);
+        } else if (strcmp(key, "PROXYDIRSIZE") == 0) {
+            if (!ParseInboxSize(value, &config->proxydirsize)) {
+                PrintError("%s:%d - PROXYDIRSIZE must be a size like 1073741824, 500M or 2G", config->path, (int)parser.line);
+                valid = FALSE;
+            }
+        } else if (strcmp(key, "PINTERVAL") == 0) {
+            if (!ParseInterval(value, &config->pinterval)) {
+                PrintError("%s:%d - PINTERVAL must be a whole number of seconds between 1 and 86400", config->path, (int)parser.line);
+                valid = FALSE;
+            }
+        } else if (strcmp(key, "HISTORY") == 0) {
+            if (value[0] != '\0') snprintf(history, sizeof(history), "%s", value);
         } else if (strcmp(key, "PASSWORD") == 0) {
             if (strlen(value) >= MAX_PASSWORD_SIZE) {
                 PrintError("%s:%d - PASSWORD is too long", config->path, (int)parser.line);
@@ -215,7 +271,10 @@ BOOL LoadConfig(Config* config) {
 
     if (!ResolvePath(config, inbox, config->inbox, sizeof(config->inbox)) ||
         !ResolvePath(config, dns, config->dns, sizeof(config->dns)) ||
-        !ResolvePath(config, state, config->state, sizeof(config->state))) {
+        !ResolvePath(config, state, config->state, sizeof(config->state)) ||
+        !ResolvePath(config, history, config->history, sizeof(config->history)) ||
+        !ResolvePath(config, proxypath, config->proxypath, sizeof(config->proxypath)) ||
+        !ResolvePath(config, proxydir, config->proxydir, sizeof(config->proxydir))) {
         PrintError("Config paths are too long");
         return FALSE;
     }
@@ -225,8 +284,13 @@ BOOL LoadConfig(Config* config) {
         return FALSE;
     }
     if (!ParentDirectory(parent, sizeof(parent), config->dns) || !MakeDirectories(parent) ||
-        !ParentDirectory(parent, sizeof(parent), config->state) || !MakeDirectories(parent)) {
-        PrintError("Unable to create folders for the DNS/STATE files");
+        !ParentDirectory(parent, sizeof(parent), config->state) || !MakeDirectories(parent) ||
+        !ParentDirectory(parent, sizeof(parent), config->history) || !MakeDirectories(parent)) {
+        PrintError("Unable to create folders for the DNS/STATE/HISTORY files");
+        return FALSE;
+    }
+    if (config->proxy && !MakeDirectories(config->proxydir)) {
+        PrintError("Unable to create proxy directory \"%s\"", config->proxydir);
         return FALSE;
     }
     return TRUE;

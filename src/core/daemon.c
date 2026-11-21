@@ -1,6 +1,7 @@
 #include "daemon.h"
 #include "core/platform.h"
 #include "core/transfer.h"
+#include "core/relay.h"
 #include "core/wire.h"
 #include "util/output.h"
 #include <easynet.h>
@@ -126,6 +127,11 @@ BOOL StartDaemon(const Config* config) {
             FormatSize(limit, sizeof(limit), config->inboxsize);
             PrintSuccess("mailbox is up as \"%s\" on port %u (pid %lld)", config->id, (unsigned int)runtime.port, (long long)runtime.pid);
             printf("  directory: %s (%s limit%s)\n", config->inbox, limit, config->protected ? ", password protected" : "");
+            if (config->proxy) {
+                char proxylimit[32] = { 0 };
+                FormatSize(proxylimit, sizeof(proxylimit), config->proxydirsize);
+                printf("  proxying: %s (%s limit, retrying every %us)\n", config->proxydir, proxylimit, (unsigned int)config->pinterval);
+            }
             return TRUE;
         }
         ez_sleep_ms(DAEMON_POLL_MS);
@@ -162,13 +168,26 @@ BOOL StopDaemon(const Config* config) {
     return TRUE;
 }
 
-static BOOL WaitForConnection(ez_Server* server) {
+typedef enum {
+    WAITED_CONNECTION = 0,
+    WAITED_TIMEOUT,
+    WAITED_ERROR
+} WaitResult;
+
+static WaitResult WaitForConnection(ez_Server* server, int64_t wait_ms) {
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(server->socket, &readfds);
-    // blocks with no timeout - the process sleeps until a connection (or signal) arrives
-    int found = select((int)server->socket + 1, &readfds, NULL, NULL, NULL);
-    return found > 0;
+    struct timeval timeout;
+    struct timeval* limit = NULL;
+    if (wait_ms >= 0) {
+        timeout.tv_sec = (long)(wait_ms / 1000);
+        timeout.tv_usec = (long)((wait_ms % 1000) * 1000);
+        limit = &timeout;
+    }
+    int found = select((int)server->socket + 1, &readfds, NULL, NULL, limit);
+    if (found > 0) return WAITED_CONNECTION;
+    return found == 0 ? WAITED_TIMEOUT : WAITED_ERROR;
 }
 
 int RunDaemon(const Config* config) {
@@ -199,10 +218,20 @@ int RunDaemon(const Config* config) {
     }
     LogEvent("mailbox %s up as \"%s\" on port %u (pid %lld), receiving into \"%s\"",
         MAILBOX_VERSION, config->id, (unsigned int)config->port, (long long)runtime.pid, config->inbox);
+    if (config->proxy) {
+        LogEvent("Acting as a proxy - holding relayed files in \"%s\", retrying every %us",
+            config->proxydir, (unsigned int)config->pinterval);
+    }
 
+    Relay relay;
+    InitializeRelay(&relay, config);
     BOOL shutdown = FALSE;
     while (!shutdown && !g_terminate) {
-        if (!WaitForConnection(server)) {
+        RunRelayJobs(&relay);
+        if (g_terminate) break;
+        WaitResult wait = WaitForConnection(server, RelayWaitMs(&relay));
+        if (wait == WAITED_TIMEOUT) continue;
+        if (wait == WAITED_ERROR) {
             if (g_terminate) break;
             ez_sleep_ms(ACCEPT_BACKOFF_MS);
             continue;
@@ -212,9 +241,10 @@ int RunDaemon(const Config* config) {
             ez_sleep_ms(ACCEPT_BACKOFF_MS);
             continue;
         }
-        ReceiveMail(config, connection->socket, runtime.token, &shutdown);
+        ReceiveMail(config, &relay, connection->socket, runtime.token, &shutdown);
         EZ_CLOSE_CONNECTION(connection);
     }
+    CleanRelay(&relay);
 
     Runtime current;
     if (ReadRuntime(config, &current) && current.pid == runtime.pid) RemoveRuntime(config);
