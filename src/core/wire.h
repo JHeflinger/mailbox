@@ -13,7 +13,8 @@ typedef enum {
     MSG_COMPLETE,
     MSG_RESULT,
     MSG_SHUTDOWN,
-    MSG_STATUS
+    MSG_STATUS,
+    MSG_CHAT_QUEUE
 } MessageType;
 
 typedef enum {
@@ -34,6 +35,11 @@ typedef enum {
     DELIVERY_DIRECT = 0,
     DELIVERY_PROXY
 } DeliveryKind;
+
+typedef enum {
+    CONTENT_FILE = 0,
+    CONTENT_CHAT
+} ContentKind;
 
 typedef enum {
     OUTCOME_DELIVERED = 0,

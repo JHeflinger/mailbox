@@ -19,6 +19,8 @@ BOOL ClearCommand(char** argv, int argc);
 
 BOOL HistoryCommand(char** argv, int argc);
 
+BOOL ChatCommand(char** argv, int argc);
+
 BOOL DaemonCommand(char** argv, int argc);
 
 #endif

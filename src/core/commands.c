@@ -4,6 +4,7 @@
 #include "data/config.h"
 #include "data/state.h"
 #include "data/history.h"
+#include "core/chatroom.h"
 #include "util/output.h"
 #include <easylogger.h>
 #include <stdio.h>
@@ -27,7 +28,8 @@ BOOL HelpCommand(char** argv, int argc) {
     printf("  mailbox inbox [all]                  lists unread mail and who sent it (\"all\" includes read mail)\n");
     printf("  mailbox send <ip|id>[:port] <file>   sends a file to an IP address or a known ID\n");
     printf("  mailbox clear <all|id...>            marks all mail, or the given mail IDs, as read\n");
-    printf("  mailbox history [all|count]          lists files you've sent (last %d by default)\n\n", DEFAULT_HISTORY_COUNT);
+    printf("  mailbox history [all|count]          lists files you've sent (last %d by default)\n", DEFAULT_HISTORY_COUNT);
+    printf("  mailbox chat [id]                    opens a chat with a mailbox ID, or lists your chats\n\n");
     printf("config: %s\n", config);
     printf("  set %s to use a different config file\n", CONFIG_ENV_VARIABLE);
     printf("  set %s to skip the password prompt when sending\n\n", PASSWORD_ENV_VARIABLE);
@@ -275,6 +277,17 @@ BOOL HistoryCommand(char** argv, int argc) {
     }
     CleanHistory(&history);
     return TRUE;
+}
+
+BOOL ChatCommand(char** argv, int argc) {
+    if (argc > 3) {
+        PrintUsage("mailbox chat [id]");
+        return FALSE;
+    }
+    Config config;
+    if (!LoadConfig(&config)) return FALSE;
+    if (argc == 2) return ListChatRooms(&config);
+    return RunChatRoom(&config, argv[2]);
 }
 
 BOOL DaemonCommand(char** argv, int argc) {

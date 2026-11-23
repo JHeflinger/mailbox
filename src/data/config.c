@@ -107,6 +107,8 @@ static BOOL GenerateConfig(const char* path) {
     fprintf(file, "PROXYDIR: %s\n", DEFAULT_PROXYDIR_NAME);
     fprintf(file, "PROXYDIRSIZE: 1G\n");
     fprintf(file, "PINTERVAL: %d\n", DEFAULT_PINTERVAL);
+    fprintf(file, "CHATPATH: %s\n", DEFAULT_CHATPATH_NAME);
+    fprintf(file, "CHATSIZE: 10M\n");
     fprintf(file, "PASSWORD:\n");
     fclose(file);
     RestrictFile(path);
@@ -171,6 +173,8 @@ BOOL LoadConfig(Config* config) {
     config->proxy = FALSE;
     config->proxydirsize = DEFAULT_PROXYDIRSIZE;
     config->pinterval = DEFAULT_PINTERVAL;
+    config->chatsize = DEFAULT_CHATSIZE;
+    char chatpath[MAX_PATH_SIZE] = DEFAULT_CHATPATH_NAME;
     char proxypath[MAX_PATH_SIZE] = DEFAULT_PROXYPATH_NAME;
     char proxydir[MAX_PATH_SIZE] = DEFAULT_PROXYDIR_NAME;
     char inbox[MAX_PATH_SIZE] = DEFAULT_INBOX_NAME;
@@ -241,6 +245,13 @@ BOOL LoadConfig(Config* config) {
                 PrintError("%s:%d - PROXYDIRSIZE must be a size like 1073741824, 500M or 2G", config->path, (int)parser.line);
                 valid = FALSE;
             }
+        } else if (strcmp(key, "CHATPATH") == 0) {
+            if (value[0] != '\0') snprintf(chatpath, sizeof(chatpath), "%s", value);
+        } else if (strcmp(key, "CHATSIZE") == 0) {
+            if (!ParseInboxSize(value, &config->chatsize)) {
+                PrintError("%s:%d - CHATSIZE must be a size like 1048576, 500K or 10M", config->path, (int)parser.line);
+                valid = FALSE;
+            }
         } else if (strcmp(key, "PINTERVAL") == 0) {
             if (!ParseInterval(value, &config->pinterval)) {
                 PrintError("%s:%d - PINTERVAL must be a whole number of seconds between 1 and 86400", config->path, (int)parser.line);
@@ -274,7 +285,8 @@ BOOL LoadConfig(Config* config) {
         !ResolvePath(config, state, config->state, sizeof(config->state)) ||
         !ResolvePath(config, history, config->history, sizeof(config->history)) ||
         !ResolvePath(config, proxypath, config->proxypath, sizeof(config->proxypath)) ||
-        !ResolvePath(config, proxydir, config->proxydir, sizeof(config->proxydir))) {
+        !ResolvePath(config, proxydir, config->proxydir, sizeof(config->proxydir)) ||
+        !ResolvePath(config, chatpath, config->chatpath, sizeof(config->chatpath))) {
         PrintError("Config paths are too long");
         return FALSE;
     }
@@ -287,6 +299,10 @@ BOOL LoadConfig(Config* config) {
         !ParentDirectory(parent, sizeof(parent), config->state) || !MakeDirectories(parent) ||
         !ParentDirectory(parent, sizeof(parent), config->history) || !MakeDirectories(parent)) {
         PrintError("Unable to create folders for the DNS/STATE/HISTORY files");
+        return FALSE;
+    }
+    if (!MakeDirectories(config->chatpath)) {
+        PrintError("Unable to create chat directory \"%s\"", config->chatpath);
         return FALSE;
     }
     if (config->proxy && !MakeDirectories(config->proxydir)) {

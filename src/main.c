@@ -26,6 +26,7 @@ static const Command g_commands[] = {
     { "send",         SendCommand },
     { "clear",        ClearCommand },
     { "history",      HistoryCommand },
+    { "chat",         ChatCommand },
     { DAEMON_COMMAND, DaemonCommand },
 };
 

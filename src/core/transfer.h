@@ -27,6 +27,8 @@ typedef struct {
     uint16_t replyport;
     uint8_t hops;
     BOOL interactive;
+    BOOL chat;
+    const uint8_t* data;
 } Transmission;
 
 typedef struct {
@@ -56,6 +58,8 @@ BOOL SendMail(const Config* config, const char* target, const char* filepath);
 void ReceiveMail(const Config* config, Relay* relay, EZ_SOCKET socket, const uint8_t* token, BOOL* shutdown);
 
 BOOL RequestShutdown(const Config* config, const uint8_t* token);
+
+BOOL QueueChatMessage(uint16_t port, const uint8_t* token, const char* host, const char* text, char* error, size_t size);
 
 BOOL SanitizeFilename(const char* name, char* out, size_t size);
 

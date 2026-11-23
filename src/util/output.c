@@ -1,4 +1,5 @@
 #include "output.h"
+#include "terminal.h"
 #include <easylogger.h>
 #include <easytime.h>
 #include <stdio.h>
@@ -18,7 +19,6 @@
 #endif
 #else
 #include <unistd.h>
-#include <sys/ioctl.h>
 #define ISATTY(fd) isatty(fd)
 #endif
 
@@ -30,19 +30,6 @@
 static BOOL g_colors = FALSE;
 static BOOL g_interactive = FALSE;
 static BOOL g_cursor_hidden = FALSE;
-
-static int TerminalColumns() {
-    #ifdef _WIN32
-    CONSOLE_SCREEN_BUFFER_INFO info;
-    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
-        return info.srWindow.Right - info.srWindow.Left + 1;
-    }
-    #else
-    struct winsize size;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
-    #endif
-    return FALLBACK_COLUMNS;
-}
 
 #ifdef _WIN32
 static BOOL WINAPI RestoreOnInterrupt(DWORD event) {
@@ -173,7 +160,7 @@ static void DrawProgress(Progress* progress) {
     char percent[16] = { 0 };
     snprintf(percent, sizeof(percent), " %6.2f%%", pct);
     snprintf(details, sizeof(details), "%s  %s / %s  %s/s", percent, done, total, rate);
-    int columns = (g_interactive ? TerminalColumns() : FALLBACK_COLUMNS) - 1;
+    int columns = (g_interactive ? TerminalWidth() : FALLBACK_COLUMNS) - 1;
     const char* label = "Progress: ";
     int fixed = (int)strlen(label) + 2;
     int width = columns - fixed - (int)strlen(details);

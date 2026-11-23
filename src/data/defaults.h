@@ -14,11 +14,11 @@
 #define PATH_SEPARATOR '/'
 #endif
 
-#define MAILBOX_VERSION "1.1.0"
+#define MAILBOX_VERSION "1.2.0"
 
 // protocol
 #define PROTOCOL_MAGIC 0x584F424DU // "MBOX"
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 3
 #define MAX_PACKET_SIZE 4096
 #define CHUNK_SIZE (64 * 1024)
 #define NONCE_SIZE 32
@@ -39,6 +39,9 @@
 #define MAX_LINE_SIZE 2048
 #define MAX_COPY_INDEX 100000
 #define MAX_DETAIL_SIZE 192
+#define MAX_CHAT_SIZE 1024
+#define MAX_CHAT_PAYLOAD (MAX_CHAT_SIZE + 32)
+#define MAX_PENDING_CHATS 500
 #define DEFAULT_HISTORY_COUNT 20
 
 // defaults
@@ -56,6 +59,9 @@
 #define DEFAULT_PINTERVAL 60
 #define RELAY_QUEUE_NAME "relayqueue"
 #define RELAY_EXTENSION ".relay"
+#define DEFAULT_CHATPATH_NAME "chats"
+#define DEFAULT_CHATSIZE (10ULL * 1024ULL * 1024ULL)
+#define CHAT_EXTENSION ".chat"
 #define RUNTIME_FILE_NAME "mailbox.pid"
 #define LOG_FILE_NAME "mailbox.log"
 #define PART_EXTENSION ".mailbox-part"

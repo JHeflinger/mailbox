@@ -20,6 +20,8 @@ typedef struct {
     char proxydir[MAX_PATH_SIZE];
     uint64_t proxydirsize;
     uint32_t pinterval;
+    char chatpath[MAX_PATH_SIZE];
+    uint64_t chatsize;
     char password[MAX_PASSWORD_SIZE];
     BOOL protected;
 } Config;

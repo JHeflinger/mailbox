@@ -25,6 +25,9 @@ typedef struct {
     char saved[MAX_FILENAME_SIZE];
     int64_t due;
     uint32_t attempts;
+    uint8_t content;
+    int64_t chattime;
+    char text[MAX_CHAT_SIZE];
 } RelayJob;
 
 DECLARE_ARRLIST(RelayJob);
@@ -50,6 +53,10 @@ BOOL RelayStoragePath(Relay* relay, const char* tracking, BOOL part, char* out, 
 void QueueForward(Relay* relay, const RelayJob* job);
 
 void HandleStatus(Relay* relay, const char* tracking, uint8_t outcome, const char* detail, const char* saved);
+
+uint64_t HeldChatBytes(Relay* relay);
+
+int QueueChat(Relay* relay, const char* host, const char* text, char* message, size_t size);
 
 BOOL ValidTracking(const char* tracking);
 

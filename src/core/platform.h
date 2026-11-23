@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef void (*FileVisitor)(const char* name, void* data);
+
 typedef enum {
     DETACH_FAILED = 0,
     DETACH_PARENT,
@@ -28,6 +30,8 @@ BOOL QueryFileSize(const char* path, uint64_t* size);
 uint64_t DirectoryUsage(const char* path);
 
 void PurgeExtension(const char* directory, const char* extension);
+
+void ListDirectory(const char* directory, FileVisitor visitor, void* data);
 
 BOOL MoveReplace(const char* source, const char* destination);
 

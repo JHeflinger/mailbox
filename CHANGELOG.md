@@ -1,6 +1,11 @@
 # Change Log
 All notable changes to this project will be documented in this file as of mailbox v1.0
 
+## mailbox 1.2.0
+
+### Added
+- Mailbox now supports chatting with the chat command, make sure to add CHATPATH and CHATSIZE to config!
+
 ## mailbox 1.1.0
 
 ### Added

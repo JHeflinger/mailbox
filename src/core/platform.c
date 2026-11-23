@@ -202,6 +202,30 @@ void PurgeExtension(const char* directory, const char* extension) {
     #endif
 }
 
+void ListDirectory(const char* directory, FileVisitor visitor, void* data) {
+    #ifdef _WIN32
+    char pattern[MAX_PATH_SIZE] = { 0 };
+    if (!JoinPath(pattern, sizeof(pattern), directory, "*")) return;
+    WIN32_FIND_DATAA found;
+    HANDLE handle = FindFirstFileA(pattern, &found);
+    if (handle == INVALID_HANDLE_VALUE) return;
+    do {
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        visitor(found.cFileName, data);
+    } while (FindNextFileA(handle, &found));
+    FindClose(handle);
+    #else
+    DIR* dir = opendir(directory);
+    if (dir == NULL) return;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        visitor(entry->d_name, data);
+    }
+    closedir(dir);
+    #endif
+}
+
 BOOL MoveReplace(const char* source, const char* destination) {
     #ifdef _WIN32
     return MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;

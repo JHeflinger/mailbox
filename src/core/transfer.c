@@ -6,6 +6,7 @@
 #include "data/dns.h"
 #include "data/state.h"
 #include "data/history.h"
+#include "data/chat.h"
 #include "util/sha256.h"
 #include "util/output.h"
 #include <easymemory.h>
@@ -170,6 +171,14 @@ static SentStatus VerdictStatus(uint8_t code) {
     }
 }
 
+static StreamResult StreamMemory(EZ_SOCKET socket, const uint8_t* data, uint64_t size, uint8_t digest[SHA256_SIZE]) {
+    Sha256 sha;
+    Sha256Begin(&sha);
+    Sha256Feed(&sha, data, (size_t)size);
+    Sha256Finish(&sha, digest);
+    return SendAll(socket, data, (size_t)size) ? STREAM_OK : STREAM_LOST;
+}
+
 static StreamResult StreamFile(EZ_SOCKET socket, const char* filepath, uint64_t filesize, BOOL interactive, uint8_t digest[SHA256_SIZE]) {
     FILE* file = fopen(filepath, "rb");
     if (file == NULL) return STREAM_LOCAL;
@@ -211,6 +220,7 @@ static TransmitResult Converse(EZ_SOCKET socket, ez_Buffer* buffer, const Transm
     PacketString(buffer, t->filename);
     PacketU64(buffer, t->size);
     PacketU8(buffer, t->proxy ? DELIVERY_PROXY : DELIVERY_DIRECT);
+    PacketU8(buffer, t->chat ? CONTENT_CHAT : CONTENT_FILE);
     if (t->proxy) {
         PacketString(buffer, t->target);
         PacketString(buffer, t->tracking);
@@ -285,7 +295,8 @@ static TransmitResult Converse(EZ_SOCKET socket, ez_Buffer* buffer, const Transm
 
     SetSocketTimeout(socket, TRANSFER_TIMEOUT_MS);
     uint8_t digest[SHA256_SIZE];
-    StreamResult streamed = StreamFile(socket, t->filepath, t->size, t->interactive, digest);
+    StreamResult streamed = t->data != NULL ? StreamMemory(socket, t->data, t->size, digest)
+                                            : StreamFile(socket, t->filepath, t->size, t->interactive, digest);
     if (streamed == STREAM_LOCAL) {
         snprintf(o->message, sizeof(o->message), "unable to read \"%s\" - did it change while sending?", t->filepath);
         return TRANSMIT_LOCAL;
@@ -480,6 +491,34 @@ BOOL RequestShutdown(const Config* config, const uint8_t* token) {
     return ok;
 }
 
+BOOL QueueChatMessage(uint16_t port, const uint8_t* token, const char* host, const char* text, char* error, size_t size) {
+    ez_Ipv4 loopback = { { 127, 0, 0, 1 } };
+    snprintf(error, size, "your mailbox isn't responding - is it up?");
+    EZ_SOCKET socket = ConnectQuick(loopback, port, RELAY_CONNECT_TIMEOUT_MS);
+    if (socket == EZ_INVALID_SOCK) return FALSE;
+    SetSocketTimeout(socket, 5000);
+    ez_Buffer* buffer = EZ_GENERATE_BUFFER(PACKET_BUFFER_SIZE);
+    PacketBegin(buffer, MSG_CHAT_QUEUE);
+    PacketBytes(buffer, token, TOKEN_SIZE);
+    PacketString(buffer, host);
+    PacketString(buffer, text);
+    BOOL ok = FALSE;
+    MessageType type;
+    if (SendPacket(socket, buffer) && ReceivePacket(socket, buffer, &type) && type == MSG_VERDICT) {
+        PacketReader reader = BeginReading(buffer);
+        uint8_t code = ReadU8(&reader);
+        ReadU64(&reader);
+        ReadU64(&reader);
+        char message[MAX_DETAIL_SIZE] = { 0 };
+        ReadString(&reader, message, sizeof(message));
+        ok = code == VERDICT_ACCEPT;
+        if (!ok) VerdictReason(code, message, error, size);
+    }
+    EZ_CLEAN_BUFFER(buffer);
+    CloseSocket(socket);
+    return ok;
+}
+
 static void SendVerdict(EZ_SOCKET socket, ez_Buffer* buffer, const char* id, VerdictCode code, uint64_t available, uint64_t limit, const char* message) {
     PacketBegin(buffer, MSG_VERDICT);
     PacketU8(buffer, (uint8_t)code);
@@ -539,6 +578,104 @@ static void ServeStatus(Relay* relay, EZ_SOCKET socket, ez_Buffer* buffer, Packe
     SendVerdict(socket, buffer, config->id, VERDICT_ACCEPT, 0, 0, "");
 }
 
+static void ServeChat(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffer* buffer, const char* peer,
+        const char* sender, const char* target, const char* tracking, uint16_t replyport, uint8_t hops, BOOL relaying, uint64_t size) {
+    // chats are tiny, so they stay in memory - relayed ones live in the relay queue, delivered ones in the chat log
+    uint64_t used = relaying ? DirectoryUsage(config->proxydir) + HeldChatBytes(relay) : DirectoryUsage(config->chatpath);
+    uint64_t limit = relaying ? config->proxydirsize : config->chatsize;
+    uint64_t available = used >= limit ? 0 : limit - used;
+    if (size + 64 > available) {
+        SendVerdict(socket, buffer, config->id, VERDICT_NO_SPACE, available, limit, relaying ? "proxy storage full" : "chat storage full");
+        LogEvent("Rejected a chat from %s (%s) - %s", sender, peer, relaying ? "proxy storage full" : "chat storage full");
+        return;
+    }
+    SendVerdict(socket, buffer, config->id, VERDICT_ACCEPT, available, limit, "");
+    SetSocketTimeout(socket, TRANSFER_TIMEOUT_MS);
+    char payload[MAX_CHAT_PAYLOAD + 1] = { 0 };
+    MessageType type;
+    if (!ReceiveAll(socket, payload, (size_t)size) || !ReceivePacket(socket, buffer, &type) || type != MSG_COMPLETE) {
+        LogEvent("Chat from %s (%s) was cut off", sender, peer);
+        return;
+    }
+    uint8_t digest[SHA256_SIZE];
+    uint8_t claimed[SHA256_SIZE];
+    Sha256 sha;
+    Sha256Begin(&sha);
+    Sha256Feed(&sha, payload, (size_t)size);
+    Sha256Finish(&sha, digest);
+    PacketReader reader = BeginReading(buffer);
+    ReadBytes(&reader, claimed, sizeof(claimed));
+    if (!FinishReading(&reader) || !DigestsMatch(claimed, digest, SHA256_SIZE)) {
+        SendResult(socket, buffer, VERDICT_CORRUPT, "checksum mismatch", FALSE);
+        return;
+    }
+    // payload is "<unix time sent>\n<text>"
+    char* newline = strchr(payload, '\n');
+    if (newline == NULL) {
+        SendResult(socket, buffer, VERDICT_INVALID, "malformed chat", FALSE);
+        return;
+    }
+    *newline = '\0';
+    int64_t sent = (int64_t)strtoll(payload, NULL, 10);
+    char* text = newline + 1;
+    SanitizeChatText(text);
+    if (text[0] == '\0') {
+        SendResult(socket, buffer, VERDICT_INVALID, "empty chat", FALSE);
+        return;
+    }
+
+    if (relaying) {
+        RelayJob job = { 0 };
+        job.kind = JOB_FORWARD;
+        job.content = CONTENT_CHAT;
+        snprintf(job.tracking, sizeof(job.tracking), "%.*s", TRACKING_SIZE, tracking);
+        snprintf(job.origin, sizeof(job.origin), "%s", sender);
+        snprintf(job.target, sizeof(job.target), "%s", target);
+        snprintf(job.upstream, sizeof(job.upstream), "%s", peer);
+        job.upstreamport = replyport;
+        snprintf(job.filename, sizeof(job.filename), "chat");
+        job.hops = hops;
+        job.chattime = sent;
+        snprintf(job.text, sizeof(job.text), "%s", text);
+        job.size = strlen(job.text);
+        job.due = (int64_t)time(NULL);
+        QueueForward(relay, &job);
+        SendResult(socket, buffer, VERDICT_ACCEPT, "chat", FALSE);
+        LogEvent("Holding a chat from %s (%s) for %s [%.8s]", sender, peer, target, tracking);
+        return;
+    }
+    AppendResult appended = AppendChatMessage(config, sender, FALSE, tracking, sent, text);
+    if (appended != APPEND_OK) {
+        SendResult(socket, buffer, VERDICT_FAILED, appended == APPEND_FULL ? "chat storage full" : "could not save chat", FALSE);
+        LogEvent("Unable to save a chat from %s (%s)", sender, peer);
+        return;
+    }
+    SendResult(socket, buffer, VERDICT_ACCEPT, "chat", TRUE);
+}
+
+static void ServeChatQueue(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffer* buffer, PacketReader* reader,
+        const char* peer, const uint8_t* token) {
+    uint8_t given[TOKEN_SIZE];
+    char host[MAX_ID_SIZE] = { 0 };
+    char text[MAX_CHAT_SIZE] = { 0 };
+    ReadBytes(reader, given, sizeof(given));
+    ReadString(reader, host, sizeof(host));
+    ReadString(reader, text, sizeof(text));
+    if (!FinishReading(reader) || strncmp(peer, "127.", 4) != 0 || !DigestsMatch(given, token, TOKEN_SIZE)) {
+        LogEvent("Rejected an invalid chat queue request from %s", peer);
+        SendVerdict(socket, buffer, config->id, VERDICT_INVALID, 0, 0, "invalid chat request");
+        return;
+    }
+    SanitizeChatText(text);
+    if (!ValidID(host) || text[0] == '\0') {
+        SendVerdict(socket, buffer, config->id, VERDICT_INVALID, 0, 0, "invalid recipient or empty message");
+        return;
+    }
+    char message[MAX_DETAIL_SIZE] = { 0 };
+    VerdictCode code = QueueChat(relay, host, text, message, sizeof(message));
+    SendVerdict(socket, buffer, config->id, code, 0, 0, message);
+}
+
 static void Serve(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffer* buffer, const char* peer,
         const uint8_t* token, BOOL* shutdown, char* partpath, size_t partsize) {
     MessageType type;
@@ -562,6 +699,10 @@ static void Serve(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffe
     }
     if (type == MSG_STATUS) {
         ServeStatus(relay, socket, buffer, &reader, peer);
+        return;
+    }
+    if (type == MSG_CHAT_QUEUE) {
+        ServeChatQueue(config, relay, socket, buffer, &reader, peer, token);
         return;
     }
     if (type != MSG_HELLO) {
@@ -588,6 +729,7 @@ static void Serve(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffe
     ReadString(&reader, requested, sizeof(requested));
     uint64_t filesize = ReadU64(&reader);
     uint8_t kind = ReadU8(&reader);
+    uint8_t content = ReadU8(&reader);
     uint16_t replyport = 0;
     uint8_t hops = 0;
     if (kind == DELIVERY_PROXY) {
@@ -597,7 +739,9 @@ static void Serve(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffe
         hops = ReadU8(&reader);
     }
     char filename[MAX_FILENAME_SIZE] = { 0 };
-    BOOL valid = FinishReading(&reader) && ValidID(sender) && SanitizeFilename(requested, filename, sizeof(filename)) && kind <= DELIVERY_PROXY;
+    BOOL valid = FinishReading(&reader) && ValidID(sender) && SanitizeFilename(requested, filename, sizeof(filename)) &&
+        kind <= DELIVERY_PROXY && content <= CONTENT_CHAT;
+    if (valid && content == CONTENT_CHAT) valid = filesize > 0 && filesize <= MAX_CHAT_PAYLOAD && kind == DELIVERY_PROXY;
     if (valid && kind == DELIVERY_PROXY) valid = ValidID(target) && ValidTracking(tracking) && replyport >= 1024;
     if (!valid) {
         SendVerdict(socket, buffer, config->id, VERDICT_INVALID, 0, 0, "malformed request (bad sender ID, file name or proxy header)");
@@ -637,13 +781,19 @@ static void Serve(const Config* config, Relay* relay, EZ_SOCKET socket, ez_Buffe
         SendVerdict(socket, buffer, config->id, VERDICT_FAILED, 0, 0, "receiver could not generate a challenge");
         return;
     }
+    BOOL protected = config->protected && content == CONTENT_FILE; // chats skip PASSWORD
     PacketBegin(buffer, MSG_WELCOME);
     PacketString(buffer, config->id);
-    PacketU8(buffer, config->protected ? 1 : 0);
+    PacketU8(buffer, protected ? 1 : 0);
     PacketBytes(buffer, nonce, sizeof(nonce));
     if (!SendPacket(socket, buffer)) return;
 
-    if (config->protected) {
+    if (content == CONTENT_CHAT) {
+        ServeChat(config, relay, socket, buffer, peer, sender, target, tracking, replyport, hops, relaying, filesize);
+        return;
+    }
+
+    if (protected) {
         if (!ReceivePacket(socket, buffer, &type) || type != MSG_AUTH) {
             LogEvent("%s (%s) disconnected during authentication", sender, peer);
             return;
